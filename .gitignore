@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+public/wasm/
+public/models/*.task
+public/models/*.download
+.env
+.env.*
+!.env.example
+*.local
+test-results/
+playwright-report/

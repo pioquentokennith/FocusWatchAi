@@ -5,13 +5,13 @@ import { clearOverlay, drawFace } from '../lib/drawFace.js'
 
 const initial = { phase: 'idle', state: 'UNKNOWN', progress: 0, seconds: 0, warning: false, alarmActive: false, alarmReason: null, counts: { EYES_CLOSED: 0, LOOKING_AWAY: 0, NO_FACE: 0 }, landmarks: 0, fps: 0, error: '' }
 
-export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlarmChange }) {
+export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlarmChange, onObservation }) {
   const [view, setView] = useState(initial)
   const [attempt, setAttempt] = useState(0)
   const engineRef = useRef(null)
   const engineSession = useRef(null)
-  const options = useRef({ overlays, onAlarmChange })
-  useEffect(() => { options.current = { overlays, onAlarmChange } }, [overlays, onAlarmChange])
+  const options = useRef({ overlays, onAlarmChange, onObservation })
+  useEffect(() => { options.current = { overlays, onAlarmChange, onObservation } }, [overlays, onAlarmChange, onObservation])
   useEffect(() => { if (!overlays) clearOverlay(canvasRef.current) }, [overlays, canvasRef])
 
   const recalibrate = useCallback(() => {
@@ -75,6 +75,7 @@ export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlar
         if (cancelled) return
         const metrics = extractFaceMetrics(result, video.videoWidth, video.videoHeight)
         const detection = engine.update(time, metrics)
+        options.current.onObservation?.(detection, time)
         if (options.current.overlays) drawFace(canvas, video, result.faceLandmarks?.[0], connections, detection.state)
         else clearOverlay(canvas)
         fpsStart ??= time

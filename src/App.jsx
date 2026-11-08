@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Activity, ArrowDown, ArrowUpRight, Camera, Check, ChevronRight, CircleHelp, Clock3, Eye, Focus, Info, Layers3, Monitor, ScanFace, Settings2, ShieldCheck, SlidersHorizontal, Square, Video, X } from 'lucide-react'
 import CameraPanel from './components/CameraPanel.jsx'
 import { useCamera } from './hooks/useCamera.js'
@@ -10,7 +10,7 @@ function formatTime(seconds) {
   return `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-function App() {
+function App({ recorder }) {
   const camera = useCamera()
   const [consented, setConsented] = useState(false)
   const [mirrored, setMirrored] = useState(true)
@@ -19,11 +19,16 @@ function App() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const alarm = useAlarm()
-  const detection = useFaceDetection({ stream: camera.stream, videoRef, canvasRef, overlays, onAlarmChange: alarm.setAlarmActive })
+  const detection = useFaceDetection({ stream: camera.stream, videoRef, canvasRef, overlays, onAlarmChange: alarm.setAlarmActive, onObservation: recorder.observe })
   const desktop = window.focuswatchDesktop?.backgroundMonitoring === true
   const live = camera.status === 'live'
   const requesting = camera.status === 'requesting'
   const busy = live || requesting
+  useEffect(() => {
+    if (!camera.stream) return
+    recorder.start()
+    return () => { void recorder.finish() }
+  }, [camera.stream, recorder.start, recorder.finish])
   const aiStatus = { idle: 'Standby', loading: 'Loading', calibrating: 'Calibrating', calibration_failed: 'Retry needed', monitoring: 'Active', suspended: 'Suspended', waiting: 'Waiting', error: 'Error' }[detection.phase]
 
   function startSession() {
@@ -47,14 +52,14 @@ function App() {
           <a className="nav-item" href="#controls"><SlidersHorizontal size={18} />Camera controls</a>
         </nav>
         <div className="sidebar-bottom">
-          <div className="local-card"><span className="local-icon"><ShieldCheck size={19} /></span><strong>Local by design</strong><p>Your camera feed stays right here. Nothing is recorded or uploaded.</p><span className="local-badge"><span className="tiny-dot green" /> ON-DEVICE FACE AI</span></div>
+          <div className="local-card"><span className="local-icon"><ShieldCheck size={19} /></span><strong>Local camera · Shared insights</strong><p>Your camera feed stays on this device. Session times and detection events are saved for you and your admin.</p><span className="local-badge"><span className="tiny-dot green" /> ON-DEVICE FACE AI</span></div>
           <button className="help-button" onClick={() => setShowHelp(!showHelp)} aria-expanded={showHelp} aria-controls="help-panel"><CircleHelp size={17} />Quick guide<ArrowUpRight size={15} /></button>
-          <div className="sidebar-version"><span className="avatar">AI</span><div>Student demo<span>Continuous reminders · v0.3</span></div></div>
+          <div className="sidebar-version"><span className="avatar">AI</span><div>FocusWatchAI<span>Staff monitoring · v0.4</span></div></div>
         </div>
       </aside>
 
       <div className="main-shell">
-        <header className="topbar"><div className="breadcrumbs">Workspace<ChevronRight size={14} /><span>Visualizer</span></div><div className="topbar-right"><span className="demo-badge">DEMO BUILD</span><span className="desktop-tag"><Monitor size={14} />{desktop ? 'Desktop · Background ready' : 'Browser demo'}</span></div></header>
+        <header className="topbar"><div className="breadcrumbs">Workspace<ChevronRight size={14} /><span>Visualizer</span></div><div className="topbar-right"><span className="demo-badge">STAFF WORKSPACE</span><span className="desktop-tag"><Monitor size={14} />{desktop ? 'Desktop · Background ready' : 'Browser demo'}</span></div></header>
 
         <main id="workspace">
           <div className="page-heading"><div><div className="eyebrow"><span /> SEE THE DETAILS</div><h1>AI Object Visualizer<span>.</span></h1><p>A closer look at face and eye states, right in your browser.</p></div><a className="outline-button" href="#roadmap"><Layers3 size={16} />Demo roadmap<ArrowDown size={14} /></a></div>
@@ -86,8 +91,8 @@ function App() {
                 {alarm.isPlaying && <div className="sound-playing" role="status">Alarm playing <button className="text-button" onClick={alarm.silence}>Silence</button></div>}
                 {alarm.audioMessage && <p className="audio-message" role="status">{alarm.audioMessage}</p>}
                 <div className="control-divider" />
-                <label className={`consent ${busy ? 'is-disabled' : ''}`}><input type="checkbox" checked={consented} disabled={busy} onChange={(event) => setConsented(event.target.checked)} /><span>I agree to use my camera for this local AI demo. <small>Face and eye analysis stays on this device.</small></span></label>
-                <button className="start-button" disabled={!consented || busy} onClick={startSession}><Camera size={18} />{requesting ? 'Requesting access…' : live ? 'Camera is running' : camera.status === 'error' ? 'Try camera again' : 'Start camera'}{!busy && <ChevronRight size={16} />}</button>
+                <label className={`consent ${busy ? 'is-disabled' : ''}`}><input type="checkbox" checked={consented} disabled={busy} onChange={(event) => setConsented(event.target.checked)} /><span>I agree to camera monitoring and session insights shared with my admin. <small>Camera images and face landmarks stay on this device. Session times, event types, and durations are saved.</small></span></label>
+                <button className="start-button" disabled={!consented || busy || !recorder.ready} onClick={startSession}><Camera size={18} />{requesting ? 'Requesting access…' : live ? 'Camera is running' : camera.status === 'error' ? 'Try camera again' : 'Start camera'}{!busy && <ChevronRight size={16} />}</button>
                 <button className="stop-button" disabled={!busy && !alarm.isPlaying} onClick={stopSession}><Square size={14} />{requesting ? 'Cancel request' : 'Stop camera'}</button>
                 <div className="control-status" role="status"><span className={`tiny-dot ${live ? 'green' : ''}`} />{live ? `Camera active · AI ${aiStatus.toLowerCase()}` : requesting ? 'Waiting for browser permission' : camera.status === 'stopped' ? 'Camera released successfully' : camera.status === 'error' ? 'Camera needs your attention' : 'Ready when you are'}</div>
                 {camera.error && <div className="error-message" role="alert"><Info size={17} /><p>{camera.error}</p></div>}
@@ -101,7 +106,7 @@ function App() {
             <div className="roadmap-step current"><span className="roadmap-number"><Check size={16} /></span><span className="roadmap-stage">READY TO TRY</span><h3>Camera foundation</h3><p>Live preview, permissions, and reliable camera controls.</p></div>
             <div className="roadmap-step current"><span className="roadmap-number"><Check size={16} /></span><span className="roadmap-stage">READY TO TRY</span><h3>Face visualization</h3><p>On-device landmarks and eye-region overlays.</p></div>
             <div className="roadmap-step current"><span className="roadmap-number"><Check size={16} /></span><span className="roadmap-stage">READY TO TRY</span><h3>States & reminders</h3><p>Calibration, live timers, and visual/audio reminders.</p></div>
-            <div className="roadmap-step"><span className="roadmap-number">04</span><span className="roadmap-stage">NEXT REFINEMENT</span><h3>Session insights</h3><p>Adjustable thresholds, break controls, and richer summaries.</p></div>
+            <div className="roadmap-step current"><span className="roadmap-number"><Check size={16} /></span><span className="roadmap-stage">TEAM CONNECTED</span><h3>Session insights</h3><p>Open My insights for your saved summaries, event counts, and timelines.</p></div>
           </div></section>
           <footer className="page-footer"><span><Focus size={14} />AI Object Visualizer</span><span>Made for curiosity. Built to stay local.</span><span>React + MediaPipe<span className="footer-dot">·</span>Live AI</span></footer>
         </main>

@@ -68,7 +68,7 @@ export default function CameraPanel({ camera, mirrored, videoRef, canvasRef, det
         <div className="stage-bottom"><span className="frame-mark"><Maximize size={15} /> {mirrored ? 'MIRRORED VIEW' : 'NATURAL VIEW'}</span><button className="icon-button" onClick={fullscreen} aria-label="Toggle preview fullscreen" title="Toggle fullscreen"><Expand size={17} /></button></div>
       </div>
       {(previewError || fullscreenError) && <div className="preview-message" role="status">{previewError || fullscreenError}{previewError && <button className="text-button" onClick={playPreview}>Play preview</button>}</div>}
-      <div className="camera-footer"><span><ShieldCheck size={15} /> Your camera stays on your device</span><span>No recording. No uploads.</span></div>
+      <div className="camera-footer"><span><ShieldCheck size={15} /> Your camera stays on your device</span><span>No camera recordings. Session metadata syncs.</span></div>
     </section>
   )
 }

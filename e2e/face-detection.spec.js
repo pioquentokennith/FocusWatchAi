@@ -1,5 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
+import { mockSupabase } from './helpers/supabase.mjs'
+
+let backend
+test.beforeEach(async ({ page }) => { backend = await mockSupabase(page) })
 
 async function syntheticCamera(page, portrait = false) {
   if (portrait) {
@@ -61,6 +65,8 @@ test('loads real model assets, runs inference on a blank feed, and releases the 
   await expect(page.locator('video')).not.toHaveClass('mirrored')
   await page.getByRole('button', { name: 'Stop camera', exact: true }).click()
   await expect(page.getByText('Camera released successfully')).toBeVisible()
+  await expect.poll(() => backend.saved.some((snapshot) => snapshot.status === 'completed' && snapshot.events.some((event) => event.kind === 'NO_FACE'))).toBe(true)
+  expect(backend.saved.at(-1).events.filter((event) => event.kind === 'NO_FACE')).toHaveLength(1)
   expect(await page.evaluate(() => window.__testStream.getTracks().every((track) => track.readyState === 'ended'))).toBe(true)
   expect(errors).toEqual([])
 })

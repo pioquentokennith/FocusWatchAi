@@ -1,8 +1,8 @@
 {
   "name": "ai-object-visualizer",
   "private": true,
-  "version": "0.3.0",
-  "description": "AI Object Visualizer — local face and eye reminders with background monitoring",
+  "version": "0.4.0",
+  "description": "FocusWatchAI — staff monitoring and Supabase session insights",
   "author": "AI Object Visualizer",
   "main": "electron/main.cjs",
   "type": "module",
@@ -22,11 +22,13 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.32",
+    "@supabase/supabase-js": "^2.119.0",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@playwright/test": "^1.64.1",
     "@testing-library/react": "^16.3.0",
     "@vitejs/plugin-react": "^5.1.0",

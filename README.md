@@ -1,6 +1,14 @@
-# AI Object Visualizer
+# FocusWatchAI
 
-A React + MediaPipe + Electron demo with on-device face landmarks, eye/head-direction estimates, and repeating alarms. The desktop edition monitors while you Alt+Tab or minimize the window. No database, accounts, or remote backend are required.
+A React + MediaPipe + Electron staff monitoring app with on-device face landmarks, eye/head-direction estimates, and repeating alarms. Supabase provides assigned Staff/Admin accounts, session history, event timelines, and team insights for **one admin and up to ten staff**. The desktop edition monitors while you Alt+Tab or minimize the window.
+
+## Set up Supabase first
+
+Follow **[supabase/SETUP.md](supabase/SETUP.md)** to run the database migration and create your assigned accounts. Copy `.env.example` to `.env.local` and configure your project URL and publishable key. This machine already has those two values configured locally.
+
+For **Google sign-in + admin approval**, follow **[supabase/GOOGLE_SETUP.md](supabase/GOOGLE_SETUP.md)**. Run the new `002_google_registration.sql` migration after 001, configure Google OAuth in Supabase, and enable new-user signup. Staff use **Continue with Google**; verified Gmail applicants wait for approval in the admin's **Registration requests** tab. Pending requests do not occupy any of the ten staff slots. Existing admin email/password login remains available. This flow does not require SMTP.
+
+Staff see only their own records. The admin sees team history, filters sessions by staff/date, and can edit staff display names or disable accounts. Database policies and restricted RPCs enforce these permissions. The app queues unsynced session metadata locally and retries on reconnection. Camera frames and landmarks are never uploaded.
 
 ## Run the desktop demo (recommended for Alt+Tab)
 
@@ -33,14 +41,14 @@ Open the localhost URL printed by Vite. Camera access requires localhost or HTTP
 
 ## Use the AI demo
 
-1. Accept the camera/AI notice, select **Start camera**, and allow camera access if prompted.
+1. Sign in with your assigned staff account. Accept the camera/AI notice, select **Start camera**, and allow camera access if prompted.
 2. Wait for the model to load. A face mesh with highlighted eyes appears when a face is found.
 3. Look at the middle of your laptop screen with eyes naturally open. Hold your head and gaze steady for about five seconds to calibrate; slower devices may take longer.
 4. **No face for three seconds triggers an alarm even before calibration.** After calibration, closed eyes or looking away with your eyes/head for three seconds also triggers it.
 5. The pulse pattern **repeats until your face is visible, your eyes are open, and your gaze stays near calibration for one full second**. Face detection alone is not enough. Uncertain readings, missing video frames, and brief glances back do not clear an existing alarm.
 6. **Recalibrate** after moving the camera or changing position. Recalibrating does not dismiss an active alarm; finish calibration and recover to stop it automatically.
 7. Use **Alert volume** (default 90%), **Test sound**, and the sound-reminder switch. **Silence** dismisses sound for the current episode. Mute stops it until unmuted; an active alarm resumes when unmuted. Test sound is a finite preview unless a non-dismissed automatic alarm is already active.
-8. **Stop camera** releases the camera and model and silences the alarm. Reminder counts and camera-session duration remain visible until the next session; refresh clears them.
+8. **Stop camera** releases the camera and model and silences the alarm. Open **My insights** to view saved session times, coverage, sustained-event counts, and event timelines. Wait for **All sessions synced** before clearing local app data.
 
 One participating person should be in view. Iris position and face orientation estimate looking away, not exact screen gaze or mental focus. Switching applications alone does not trigger an alarm; the camera observations still determine the result. The app cannot override your laptop's speaker volume or a muted browser tab.
 
@@ -65,7 +73,7 @@ One participating person should be in view. Iris position and face orientation e
 - Camera cleanup on Stop and component teardown, including late permission responses.
 - Responsive dashboard, keyboard-accessible controls, and quick guide.
 
-No database, accounts, recording, or persisted session data are used. Google Fonts are requested for typography; webcam frames are not transmitted. The desktop app serves bundled assets through a secure local `focuswatch://app/` protocol, with an isolated renderer and camera-only permissions for that origin. CPU/WASM inference uses the bundled model and version-matched WASM files.
+Supabase stores accounts, session times, observation-duration totals, and detection-event metadata. A per-user local outbox retains pending records for offline sync. Google Fonts are requested for typography; webcam frames and landmarks are not transmitted or recorded. The desktop app serves bundled assets through a secure local `focuswatch://app/` protocol, with an isolated renderer and camera-only permissions for that origin. CPU/WASM inference uses the bundled model and version-matched WASM files.
 
 ## Checks
 
@@ -75,9 +83,13 @@ npm run build
 npm run preview
 ```
 
-Unit tests cover camera lifecycle, calibration, gaze, blinks, initial no-face alarms, latched alarms, stable recovery, observation gaps, native audio looping, muting, manual silence, and cancellation.
+Unit tests cover camera lifecycle, calibration, gaze, blinks, initial no-face alarms, latched alarms, stable recovery, observation gaps, native audio looping, muting, manual silence, cancellation, session recording, and offline retries. Local PostgreSQL tests also verify RLS isolation, restricted role management, account limits, atomic snapshots, and idempotent sync.
 
 Real-browser checks:
+
+Browser and desktop checks use test-only Supabase network fixtures; they do not
+create remote accounts or records. Desktop checks use a disposable user profile.
+Validate your live project using the account-isolation checklist in `supabase/SETUP.md`.
 
 ```sh
 npx playwright install chromium
@@ -112,7 +124,7 @@ A real webcam still needs manual validation for your lighting, glasses, and came
 
 1. Adjustable alert thresholds.
 2. Dedicated Pause/Resume break controls.
-3. Richer end-of-session summaries.
+3. Break annotations and CSV report exports.
 
 The existing DOCX remains the reference plan. Detection is intended as an estimate of visible face/eye cues.
 

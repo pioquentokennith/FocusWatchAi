@@ -1,16 +1,29 @@
 import { _electron as electron, expect, test } from '@playwright/test'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
+import os from 'node:os'
+import { mockSupabase } from '../e2e/helpers/supabase.mjs'
+
+const profiles = []
+test.afterAll(async () => {
+  for (const directory of profiles) await rm(directory, { recursive: true, force: true, maxRetries: 3 })
+})
 
 async function launch() {
   const { ELECTRON_RUN_AS_NODE, ...env } = process.env
+  const tempRoot = path.join(os.tmpdir(), 'opencode')
+  await mkdir(tempRoot, { recursive: true })
+  const userData = await mkdtemp(path.join(tempRoot, 'focuswatch-test-'))
+  profiles.push(userData)
   const executablePath = process.env.AI_DESKTOP_EXE
   const application = await electron.launch({
     ...(executablePath ? { executablePath } : {}),
     args: [...(executablePath ? [] : [path.resolve('.')]), '--enable-unsafe-swiftshader', '--use-fake-device-for-media-stream'],
-    env,
+    env: { ...env, FOCUSWATCH_USER_DATA_DIR: userData },
   })
   const page = await application.firstWindow()
+  await mockSupabase(page)
+  await page.reload()
   await page.waitForURL('focuswatch://app/')
   await expect(page.getByText('Desktop · Background ready')).toBeVisible()
   // Analyse real generated audio without playing test alarms on the user's speakers.

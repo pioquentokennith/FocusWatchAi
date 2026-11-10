@@ -1,10 +1,11 @@
 import { GAZE_KEYS } from './faceMetrics.js'
+import { DEFAULT_THRESHOLDS, normalizeThresholds } from './settings.js'
 
 export const STATE_LABELS = {
   ON_SCREEN: 'Screen-facing estimate', EYES_CLOSED: 'Eyes closed', LOOKING_AWAY: 'Looking away estimate',
   NO_FACE: 'No face detected', UNKNOWN: 'Uncertain observation', CALIBRATING: 'Calibrating',
 }
-export const THRESHOLDS = { EYES_CLOSED: 3000, LOOKING_AWAY: 3000, NO_FACE: 3000 }
+export const THRESHOLDS = DEFAULT_THRESHOLDS
 const MAX_GAP = 750
 const METRIC_KEYS = ['leftEye', 'rightEye', 'yaw', 'pitch', ...GAZE_KEYS]
 
@@ -21,10 +22,12 @@ function median(values) {
   return sorted[Math.floor(sorted.length / 2)]
 }
 
-export function createAttentionEngine() {
+export function createAttentionEngine(settings) {
+  const thresholds = normalizeThresholds(settings)
   let baseline = null
   let samples = []
   let calibrationStart = null
+  let calibrationInvalidSince = null
   let calibrationFailed = false
   let previousTime = null
   let smoothed = null
@@ -47,6 +50,7 @@ export function createAttentionEngine() {
     if (!preserveCalibration) {
       samples = []
       calibrationStart = null
+      calibrationInvalidSince = null
     }
   }
 
@@ -75,7 +79,10 @@ export function createAttentionEngine() {
       if (metrics.kind === 'FACE') calibrationStart ??= time
       else calibrationStart = null
       if (calibrationStart !== null && time - calibrationStart >= 25000) calibrationFailed = true
-      if (!calibrationFailed && metrics.kind === 'FACE' && gazeValid && metrics.blink < 0.35 && metrics.leftEye > 0.12 && metrics.rightEye > 0.12) {
+      const validCalibration = metrics.kind === 'FACE' && gazeValid && metrics.blink < 0.35 && metrics.leftEye > 0.12 && metrics.rightEye > 0.12
+      if (!calibrationFailed && validCalibration) {
+        if (calibrationInvalidSince !== null && time - calibrationInvalidSince >= MAX_GAP) samples = []
+        calibrationInvalidSince = null
         const recent = samples.at(-1)
         if (recent && (Math.abs(metrics.yaw - recent.yaw) > 8 || Math.abs(metrics.pitch - recent.pitch) > 8)) samples = []
         samples.push({ ...metrics, time })
@@ -85,10 +92,13 @@ export function createAttentionEngine() {
             GAZE_KEYS.some((key) => Math.max(...samples.map((sample) => sample[key])) - Math.min(...samples.map((sample) => sample[key])) > (key.endsWith('X') ? 0.20 : 0.35))) {
           samples = [samples.at(-1)]
         }
-      } else if (metrics.kind !== 'FACE' || (metrics.blink < 0.35 && !gazeValid)) {
-        samples = []
+      } else {
+        calibrationInvalidSince ??= time
+        // A natural blink can keep the recent baseline samples; sustained closure
+        // or invalid geometry must require a fresh, stable open-eye calibration.
+        if (metrics.kind !== 'FACE' || (metrics.blink < 0.35 && !gazeValid) || time - calibrationInvalidSince >= MAX_GAP) samples = []
       }
-      if (!calibrationFailed && samples.length >= 45 && time - samples[0].time >= 4500) {
+      if (!calibrationFailed && validCalibration && samples.length >= 45 && time - samples[0].time >= 4500) {
         baseline = Object.fromEntries(METRIC_KEYS.map((key) => [key, median(samples.map((sample) => sample[key]))]))
         samples = []
       } else {
@@ -144,7 +154,7 @@ export function createAttentionEngine() {
     } else recoverySince = null
 
     const duration = time - stateSince
-    if (counts[state] !== undefined && duration >= THRESHOLDS[state] && !alerted.has(state)) {
+    if (counts[state] !== undefined && duration >= thresholds[state] && !alerted.has(state)) {
       alerted.add(state)
       counts[state] += 1
       alert = state
@@ -152,16 +162,13 @@ export function createAttentionEngine() {
       alarmReason = state
     }
     return {
-      phase, state, progress,
+      phase, state, progress, thresholds,
       seconds: duration / 1000,
       warning: alarmActive,
       alarmActive, alarmReason,
       recoverySeconds: recoverySince === null ? 0 : Math.min(1, (time - recoverySince) / 1000),
       counts: { ...counts }, alert,
       awayReason,
-      gazeTracked: gazeValid && state !== 'EYES_CLOSED' && state !== 'UNKNOWN',
-      yaw: baseline && metrics.kind === 'FACE' ? Math.round(smoothed.yaw - baseline.yaw) : null,
-      pitch: baseline && metrics.kind === 'FACE' ? Math.round(smoothed.pitch - baseline.pitch) : null,
     }
   }
 

@@ -3,6 +3,7 @@ import { STATE_LABELS, THRESHOLDS } from '../lib/attentionEngine.js'
 
 export default function DetectionStatus({ detection, live }) {
   const { phase, state, counts, seconds, progress, warning } = detection
+  const thresholds = detection.thresholds || THRESHOLDS
   let title = 'AI starts with your camera'
   let detail = 'Start the camera to load the face model and calibrate your natural screen-facing position.'
   if (phase === 'loading') {
@@ -16,7 +17,7 @@ export default function DetectionStatus({ detection, live }) {
     detail = 'Improve your lighting, keep your full face visible, and select Recalibrate. Keep your eyes naturally open.'
   } else if (phase === 'monitoring') {
     title = STATE_LABELS[state]
-    detail = state === 'NO_FACE' ? `No face has been detected. A repeating alarm starts after ${THRESHOLDS.NO_FACE / 1000} seconds.` : state === 'UNKNOWN' ? 'The face or eye direction cannot be estimated reliably. New alert timers pause, but an existing alarm stays active until reliable recovery.' : state === 'EYES_CLOSED' ? `Both eyes appear closed. An alarm follows ${THRESHOLDS.EYES_CLOSED / 1000} seconds of sustained closure.` : state === 'LOOKING_AWAY' ? `Your ${detection.awayReason || 'eye or head direction'} differs from calibration. An alarm follows ${THRESHOLDS.LOOKING_AWAY / 1000} seconds of sustained deviation.` : 'Your eyes and head are close to the screen-facing position you calibrated.'
+    detail = state === 'NO_FACE' ? `No face has been detected. A repeating alarm starts after ${thresholds.NO_FACE / 1000} seconds.` : state === 'UNKNOWN' ? 'The face or eye direction cannot be estimated reliably. New alert timers pause, but an existing alarm stays active until reliable recovery.' : state === 'EYES_CLOSED' ? `Both eyes appear closed. An alarm follows ${thresholds.EYES_CLOSED / 1000} seconds of sustained closure.` : state === 'LOOKING_AWAY' ? `Your ${detection.awayReason || 'eye or head direction'} differs from calibration. An alarm follows ${thresholds.LOOKING_AWAY / 1000} seconds of sustained deviation.` : 'Your eyes and head are close to the screen-facing position you calibrated.'
   } else if (phase === 'waiting') {
     title = 'Waiting for fresh video'
     detail = 'AI will continue when new camera frames arrive. Observation gaps do not count toward a new alert or clear an existing alarm.'
@@ -24,7 +25,7 @@ export default function DetectionStatus({ detection, live }) {
     title = 'AI could not continue'
     detail = detection.error
   }
-  const threshold = THRESHOLDS[state]
+  const threshold = thresholds[state]
 
   return (
     <section className={`detection-panel ${warning ? 'detection-warning' : ''}`} aria-labelledby="detection-title">

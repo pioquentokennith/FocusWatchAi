@@ -5,13 +5,13 @@ import { clearOverlay, drawFace } from '../lib/drawFace.js'
 
 const initial = { phase: 'idle', state: 'UNKNOWN', progress: 0, seconds: 0, warning: false, alarmActive: false, alarmReason: null, counts: { EYES_CLOSED: 0, LOOKING_AWAY: 0, NO_FACE: 0 }, landmarks: 0, fps: 0, error: '' }
 
-export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlarmChange, onObservation }) {
+export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlarmChange, onObservation, thresholds }) {
   const [view, setView] = useState(initial)
   const [attempt, setAttempt] = useState(0)
   const engineRef = useRef(null)
   const engineSession = useRef(null)
-  const options = useRef({ overlays, onAlarmChange, onObservation })
-  useEffect(() => { options.current = { overlays, onAlarmChange, onObservation } }, [overlays, onAlarmChange, onObservation])
+  const options = useRef({ overlays, onAlarmChange, onObservation, thresholds })
+  useEffect(() => { options.current = { overlays, onAlarmChange, onObservation, thresholds } }, [overlays, onAlarmChange, onObservation, thresholds])
   useEffect(() => { if (!overlays) clearOverlay(canvasRef.current) }, [overlays, canvasRef])
 
   const recalibrate = useCallback(() => {
@@ -23,6 +23,7 @@ export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlar
   useEffect(() => {
     if (!stream) {
       engineSession.current = null
+      options.current.onAlarmChange?.(false)
       setView((previous) => ({ ...initial, counts: previous.counts }))
       clearOverlay(canvasRef.current)
       return
@@ -40,7 +41,7 @@ export function useFaceDetection({ stream, videoRef, canvasRef, overlays, onAlar
     let waiting = false
     const canvas = canvasRef.current
     const isNewSession = engineSession.current?.stream !== stream
-    if (isNewSession) engineSession.current = { stream, engine: createAttentionEngine() }
+    if (isNewSession) engineSession.current = { stream, engine: createAttentionEngine(options.current.thresholds) }
     const engine = engineSession.current.engine
     engine.resetContinuity()
     engineRef.current = engine

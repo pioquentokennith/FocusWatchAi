@@ -84,8 +84,15 @@ export default function AuthGate({ children }) {
   }
 
   async function signOut() {
-    const { error: problem } = await supabase.auth.signOut({ scope: 'local' })
-    if (problem) setError(problem.message)
+    try {
+      const { error: problem } = await supabase.auth.signOut({ scope: 'local' })
+      if (problem) throw problem
+      setError('')
+      return null
+    } catch (cause) {
+      setError(cause.message || 'Sign-out failed. Please try again.')
+      return cause
+    }
   }
 
   async function googleLogin() {

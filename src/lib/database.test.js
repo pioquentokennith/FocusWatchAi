@@ -33,6 +33,8 @@ beforeAll(async () => {
   `)
   await db.exec(await readFile(new URL('../../supabase/migrations/001_team_sessions.sql', import.meta.url), 'utf8'))
   await db.exec(await readFile(new URL('../../supabase/migrations/002_google_registration.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../../supabase/migrations/003_session_integrity_and_staff_updates.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../../supabase/migrations/004_daily_workflow.sql', import.meta.url), 'utf8'))
 }, 60000)
 beforeEach(async () => {
   await db.exec('reset role; truncate public.detection_events, public.sessions, public.profiles, auth.users cascade;')
@@ -42,6 +44,72 @@ beforeEach(async () => {
   }
 })
 afterAll(async () => { await db?.close() })
+
+describe('daily workflow database rules', () => {
+  const settings = { EYES_CLOSED: 1000, LOOKING_AWAY: 5000, NO_FACE: 10000 }
+  const update = (value) => db.query('select public.update_my_alert_settings($1::jsonb)', [JSON.stringify(value)])
+  const report = async (staff = null) => (await db.query("select public.session_report('2026-11-01', '2026-12-01', 'UTC', $1) as report", [staff])).rows[0].report
+  it('persists only personal staff timings and validates limits at the database', async () => {
+    await user(one)
+    await update(settings)
+    expect((await db.query('select thresholds from public.staff_settings')).rows[0].thresholds).toEqual(settings)
+    await expect(update({ ...settings, NO_FACE: 1500 })).rejects.toThrow(/whole seconds/)
+    await expect(update({ ...settings, extra: 1000 })).rejects.toThrow(/whole seconds/)
+    await expect(db.query('delete from public.staff_settings')).rejects.toThrow(/permission denied/)
+    await user(two)
+    expect((await db.query('select * from public.staff_settings')).rows).toHaveLength(0)
+    await user(admin)
+    await expect(update(settings)).rejects.toThrow(/Active staff/)
+    await db.query('select public.update_staff($1,$2,false)', [one, 'One'])
+    await user(one)
+    await expect(update(settings)).rejects.toThrow(/Active staff/)
+    await user('', 'anon')
+    await expect(update(settings)).rejects.toThrow(/permission denied/)
+  })
+
+  it('saves break lifecycle, keeps thresholds fixed, and isolates break details', async () => {
+    await user(one)
+    const log = sample()
+    await save(log.snapshot(4000))
+    log.pause('Lunch', 'Team lunch', 4500)
+    const paused = log.snapshot(8000)
+    await save(paused)
+    expect((await db.query('select activity, break_ms from public.sessions')).rows[0]).toMatchObject({ activity: 'paused', break_ms: 3500 })
+    await expect(save({ ...paused, revision: 50, thresholds: settings })).rejects.toThrow(/cannot change/)
+    await expect(save({ ...paused, revision: 50, breaks: [] })).rejects.toThrow(/inconsistent/)
+    log.resume(10000)
+    await save(log.snapshot(12000, 'completed'))
+    const breaks = (await db.query('select * from public.session_breaks')).rows
+    expect(breaks).toHaveLength(1)
+    expect(breaks[0]).toMatchObject({ reason: 'Lunch', note: 'Team lunch', duration_ms: 5500 })
+    expect(breaks[0].ended_at).not.toBeNull()
+    await user(two)
+    expect((await db.query('select * from public.session_breaks')).rows).toHaveLength(0)
+    await user(admin)
+    expect((await db.query('select * from public.session_breaks')).rows).toHaveLength(1)
+  })
+
+  it('aggregates beyond history pagination, applies RLS, and groups overnight sessions by start date', async () => {
+    await user(one)
+    for (let index = 0; index < 27; index++) {
+      const log = createSessionLedger({ device: 'desktop', time: 0, wallTime: Date.parse('2026-11-02T23:59:59Z') })
+      log.pause('Personal', '', 500)
+      log.resume(1500)
+      await save(log.snapshot(2000, 'completed'))
+    }
+    expect((await report()).rows[0]).toMatchObject({ day: '2026-11-02', sessions: 27, session_ms: 54000, camera_ms: 27000, break_ms: 27000 })
+    await user(two)
+    expect((await report()).rows).toHaveLength(0)
+    await save({ ...createSessionLedger({ device: 'browser', time: 0, wallTime: Date.parse('2026-11-03T12:00:00Z') }).snapshot(1000, 'completed'), user_id: two })
+    expect((await report(one)).rows).toHaveLength(0)
+    await user(admin)
+    expect((await report()).rows).toHaveLength(2)
+    expect((await report(one)).rows).toHaveLength(1)
+    await expect(db.query("select public.session_report('2026-11-01','2026-11-02','invalid/zone')")).rejects.toThrow(/timezone/)
+    await user('', 'anon')
+    await expect(report()).rejects.toThrow(/permission denied/)
+  }, 30000)
+})
 
 describe('PostgreSQL team access and sync', () => {
   it('isolates staff records and allows the admin to read the entire team', async () => {
@@ -94,6 +162,46 @@ describe('PostgreSQL team access and sync', () => {
     await expect(save({ ...snapshot, totals: { ...snapshot.totals, UNKNOWN: 9999 } })).rejects.toThrow(/Coverage/)
     await expect(save({ ...snapshot, events: [{ ...snapshot.events[0], observed_ms: 999999 }] })).rejects.toThrow(/event timing/)
     expect((await db.query('select * from public.sessions')).rows).toHaveLength(0)
+  })
+
+  it.each(['completed', 'interrupted'])('rejects a %s session without an end time', async (status) => {
+    await user(one)
+    const snapshot = sample().snapshot(4000, status)
+    await expect(save({ ...snapshot, ended_at: null })).rejects.toThrow(/sessions_final_end_required/)
+    expect((await db.query('select * from public.sessions')).rows).toHaveLength(0)
+    await save(snapshot)
+    expect((await db.query('select ended_at from public.sessions')).rows[0].ended_at).not.toBeNull()
+  })
+
+  it('repairs legacy final sessions and events before enforcing their end times', async () => {
+    await db.exec('alter table public.sessions drop constraint sessions_final_end_required')
+    await user(one)
+    const snapshot = sample().snapshot(4000, 'completed')
+    await save(snapshot)
+    await db.exec('reset role')
+    await db.query('update public.sessions set ended_at = null where id = $1', [snapshot.id])
+    await db.query('update public.detection_events set ended_at = null where session_id = $1', [snapshot.id])
+    await db.exec(await readFile(new URL('../../supabase/migrations/003_session_integrity_and_staff_updates.sql', import.meta.url), 'utf8'))
+    const row = (await db.query('select * from public.sessions')).rows[0]
+    expect(row.ended_at).toEqual(row.last_seen_at)
+    expect(Number(row.revision)).toBe(snapshot.revision + 1)
+    expect((await db.query('select ended_at from public.detection_events')).rows[0].ended_at).toEqual(row.last_seen_at)
+  })
+
+  it('rejects stale admin updates atomically and restricts the new RPC to admins', async () => {
+    await user(one)
+    const update = (expectedName, expectedEnabled) => db.query('select public.update_staff($1,$2,$3,$4,$5)', [two, 'Edited name', true, expectedName, expectedEnabled])
+    await expect(update('two@test.local', true)).rejects.toThrow(/Admin access required/)
+    await user(admin)
+    // Another window disables the account after this form reads it.
+    await db.query('select public.update_staff($1,$2,$3)', [two, 'New name', false])
+    await expect(update('two@test.local', true)).rejects.toMatchObject({ code: '40001' })
+    expect((await db.query('select full_name, active from public.profiles where id = $1', [two])).rows[0]).toEqual({ full_name: 'New name', active: false })
+    await expect(update(null, false)).rejects.toThrow(/Expected staff details/)
+    await update('New name', false)
+    expect((await db.query('select full_name, active from public.profiles where id = $1', [two])).rows[0]).toEqual({ full_name: 'Edited name', active: true })
+    await user('', 'anon')
+    await expect(update('Edited name', true)).rejects.toThrow(/permission denied/)
   })
 
   it('blocks disabled staff immediately at the database', async () => {

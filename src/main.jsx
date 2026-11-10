@@ -4,6 +4,7 @@ import AuthGate from './components/AuthGate.jsx'
 import TeamWorkspace from './components/TeamWorkspace.jsx'
 import './styles.css'
 import './team.css'
+import './workflow.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

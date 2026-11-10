@@ -46,7 +46,7 @@ export function useCamera() {
     setStatus('stopped')
   }, [finishTiming])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (deviceId = '') => {
     if (starting.current || activeStream.current) return
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('Camera access is unavailable. Use a supported browser on localhost or HTTPS.')
@@ -62,7 +62,7 @@ export function useCamera() {
     try {
       const nextStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' }) },
       })
 
       // Permission can resolve after Stop, a newer request, or component teardown.
@@ -93,6 +93,7 @@ export function useCamera() {
       startedAt.current = performance.now()
       setStream(nextStream)
       setStatus('live')
+      return nextStream
     } catch (cause) {
       if (generation.current !== request) return
       setError(messages[cause.name] || cause.message || 'The camera could not start. Please try again.')

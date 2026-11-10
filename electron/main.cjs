@@ -7,7 +7,8 @@ const APP_ORIGIN = 'focuswatch://app'
 const root = path.join(__dirname, '../dist')
 // Allows automated desktop checks to use a disposable profile instead of the
 // signed-in user's auth session and pending recording queue.
-if (process.env.FOCUSWATCH_USER_DATA_DIR) app.setPath('userData', process.env.FOCUSWATCH_USER_DATA_DIR)
+// Keep the pre-0.5 profile location despite the new visible product name.
+app.setPath('userData', process.env.FOCUSWATCH_USER_DATA_DIR || path.join(app.getPath('appData'), app.isPackaged ? 'AI Object Visualizer' : 'ai-object-visualizer'))
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'focuswatch', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
@@ -62,7 +63,7 @@ ipcMain.handle('google:cancel', (event) => {
 async function createWindow() {
   const window = new BrowserWindow({
     width: 1380, height: 940, minWidth: 760, minHeight: 620,
-    title: 'AI Object Visualizer', backgroundColor: '#111216',
+    title: 'FocusWatchAI', backgroundColor: '#111216',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

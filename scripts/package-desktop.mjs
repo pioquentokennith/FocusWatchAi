@@ -7,7 +7,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 if (process.platform !== 'win32') throw new Error('Build this Windows demo package on Windows.')
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
 const runtime = path.dirname(createRequire(import.meta.url)('electron'))
-const output = path.join(root, 'release', `AI Object Visualizer-win32-${process.arch}`)
+const output = path.join(root, 'release', `FocusWatchAI-win32-${process.arch}`)
 const marker = path.join(output, 'focuswatch-package.json')
 if (await stat(output).catch(() => null)) {
   const previous = await readFile(marker, 'utf8').then(JSON.parse).catch(() => null)
@@ -19,13 +19,13 @@ await writeFile(marker, JSON.stringify({ generatedBy: packageJson.name, version:
 // The demo only needs Electron and the prebuilt static bundle. No Node runtime
 // dependencies, development server, database, or installer are needed to run it.
 await cp(runtime, output, { recursive: true })
-await rename(path.join(output, 'electron.exe'), path.join(output, 'AI Object Visualizer.exe'))
+await rename(path.join(output, 'electron.exe'), path.join(output, 'FocusWatchAI.exe'))
 const application = path.join(output, 'resources/app')
 await mkdir(application, { recursive: true })
 await cp(path.join(root, 'dist'), path.join(application, 'dist'), { recursive: true })
 await cp(path.join(root, 'electron'), path.join(application, 'electron'), { recursive: true })
 await writeFile(path.join(application, 'package.json'), JSON.stringify({
-  name: packageJson.name, productName: 'AI Object Visualizer', version: packageJson.version, main: 'electron/main.cjs',
+  name: packageJson.name, productName: 'FocusWatchAI', version: packageJson.version, main: 'electron/main.cjs',
 }, null, 2))
-await writeFile(path.join(output, 'START-HERE.txt'), 'Run AI Object Visualizer.exe. Keep this entire folder together. Start the camera inside the app; Alt+Tab or minimize to continue monitoring in the background. Stop or close the app to release the camera.\r\n')
-console.log(`Desktop demo ready: ${path.join(output, 'AI Object Visualizer.exe')}`)
+await writeFile(path.join(output, 'START-HERE.txt'), 'Run FocusWatchAI.exe. Keep this entire folder together. Choose your timings in Alert settings, then start your camera. Alt+Tab or minimize to continue monitoring. Pause records a break with camera and alarm off; Resume calibrates again. Stop finishes the session. Open My insights for daily reports and CSV exports.\r\n')
+console.log(`Desktop app ready: ${path.join(output, 'FocusWatchAI.exe')}`)

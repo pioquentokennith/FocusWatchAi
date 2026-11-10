@@ -13,7 +13,7 @@ Do **not** run migration 001 again.
 
 1. Open `supabase/migrations/002_google_registration.sql` in VS Code.
 2. Copy the entire file, including `begin;` and `commit;`.
-3. Open [Supabase SQL Editor](https://supabase.com/dashboard/project/rwzkqmcsukzzpridnpoj/sql/new).
+3. Open the [Supabase dashboard](https://supabase.com/dashboard), select your project, and open **SQL Editor**.
 4. Paste it into a new query and click **Run** once.
 5. Expect **Success. No rows returned.**
 
@@ -42,10 +42,11 @@ according to `SETUP.md`. Staff do not need manual provisioning for Google regist
    http://127.0.0.1:5173
    ```
 
-8. Add this exact **Authorized redirect URI**:
+8. Add this **Authorized redirect URI**, replacing `your-project` with the project
+   reference from your Supabase URL in `.env.local`:
 
    ```text
-   https://rwzkqmcsukzzpridnpoj.supabase.co/auth/v1/callback
+   https://your-project.supabase.co/auth/v1/callback
    ```
 
 9. Create the client. Keep the **Client ID** and **Client secret** for the next step.

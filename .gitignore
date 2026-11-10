@@ -8,5 +8,28 @@ public/models/*.download
 .env.*
 !.env.example
 *.local
+
+# Local credentials, private keys, and signing certificates
+.npmrc
+.netrc
+.pypirc
+.secrets/
+secrets/
+credentials.json
+service-account*.json
+*-firebase-adminsdk-*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+
+# Logs and local tooling state can contain tokens or session data
+*.log
+.supabase/
 test-results/
 playwright-report/
+supabase/.temp/

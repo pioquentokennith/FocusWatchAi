@@ -5,8 +5,9 @@ import { createSessionLedger, createSessionOutbox } from '../lib/sessionRecorder
 export function useSessionRecorder(userId) {
   const ledger = useRef(null)
   const outbox = useRef(null)
-  const [sync, setSync] = useState({ pending: 0, error: '' })
+  const [sync, setSync] = useState({ pending: 0, rejected: 0, error: '' })
   const [ready, setReady] = useState(false)
+  const [session, setSession] = useState(null)
 
   const checkpoint = useCallback(() => {
     if (ledger.current) outbox.current?.put(ledger.current.snapshot())
@@ -14,24 +15,42 @@ export function useSessionRecorder(userId) {
   const finish = useCallback((status = 'completed') => {
     if (ledger.current) {
       outbox.current?.put(ledger.current.snapshot(performance.now(), status))
+      setSession(ledger.current.summary())
       ledger.current = null
     }
     return outbox.current?.flush()
   }, [])
-  const start = useCallback(() => {
+  const start = useCallback((thresholds) => {
     if (ledger.current || !outbox.current) return
-    ledger.current = createSessionLedger({ device: window.focuswatchDesktop ? 'desktop' : 'browser' })
+    ledger.current = createSessionLedger({ device: window.focuswatchDesktop ? 'desktop' : 'browser', thresholds })
+    setSession(ledger.current.summary())
     checkpoint()
     void outbox.current.flush()
   }, [checkpoint])
+  const pause = useCallback((reason, note) => {
+    if (!ledger.current?.pause(reason, note)) return false
+    checkpoint()
+    setSession(ledger.current.summary())
+    void outbox.current?.flush()
+    return true
+  }, [checkpoint])
+  const resume = useCallback(() => {
+    if (!ledger.current?.resume()) return false
+    checkpoint()
+    setSession(ledger.current.summary())
+    void outbox.current?.flush()
+    return true
+  }, [checkpoint])
   const observe = useCallback((detection, time) => ledger.current?.observe(detection, time), [])
-  const retry = useCallback(() => outbox.current?.flush(), [])
+  const flush = useCallback(() => outbox.current?.flush(), [])
+  const retry = useCallback(() => outbox.current?.flush({ retryRejected: true }), [])
 
   useEffect(() => {
     let mounted = true
     let releaseLock
     let saveTimer
     let syncTimer
+    let viewTimer
     const controller = new AbortController()
     setReady(false)
     function initialize() {
@@ -41,8 +60,8 @@ export function useSessionRecorder(userId) {
           send: async (snapshot) => {
             // The owner is verified again by SQL, even if accounts change while
             // this request is waiting on token refresh or the network.
-            const { error } = await supabase.rpc('save_session', { snapshot: { ...snapshot, user_id: userId } }).abortSignal(AbortSignal.timeout(15000))
-            if (error) throw error
+            const { error, status } = await supabase.rpc('save_session', { snapshot: { ...snapshot, user_id: userId } }).abortSignal(AbortSignal.timeout(15000))
+            if (error) throw Object.assign(new Error(error.message), { code: error.code, status })
           },
           onChange: (next) => { if (mounted) setSync(next) },
         })
@@ -51,9 +70,10 @@ export function useSessionRecorder(userId) {
         setSync({ pending: 0, error: 'Local session storage is unavailable or damaged. Monitoring cannot be recorded on this device.' })
         return
       }
-      void retry()
+      void flush()
       saveTimer = window.setInterval(checkpoint, 5000)
-      syncTimer = window.setInterval(retry, 15000)
+      syncTimer = window.setInterval(flush, 15000)
+      viewTimer = window.setInterval(() => { if (ledger.current) setSession(ledger.current.summary()) }, 1000)
     }
     // A second tab must not recover/overwrite the first tab's live outbox.
     if (navigator.locks) {
@@ -72,6 +92,7 @@ export function useSessionRecorder(userId) {
       mounted = false
       window.clearInterval(saveTimer)
       window.clearInterval(syncTimer)
+      window.clearInterval(viewTimer)
       window.removeEventListener('online', retry)
       window.removeEventListener('pagehide', interrupted)
       window.removeEventListener('beforeunload', interrupted)
@@ -80,7 +101,7 @@ export function useSessionRecorder(userId) {
       controller.abort()
       Promise.resolve(pending).finally(() => releaseLock?.())
     }
-  }, [userId, checkpoint, finish, retry])
+  }, [userId, checkpoint, finish, flush, retry])
 
-  return { start, finish, observe, retry, sync, ready }
+  return { start, finish, pause, resume, session, observe, retry, sync, ready }
 }

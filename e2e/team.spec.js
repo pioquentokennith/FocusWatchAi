@@ -31,6 +31,7 @@ test('admin sees team insights, date filtering, and staff controls', async ({ pa
   await expect(page.getByRole('heading', { name: 'Your team, in view.' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Monitor', exact: true })).toHaveCount(0)
   await expect(page.getByRole('cell', { name: 'Staff One', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Team insights', exact: true }).click()
   await page.getByLabel('From', { exact: true }).fill('2026-11-09')
   await expect(page.getByText('No sessions yet.', { exact: false })).toBeVisible()
   await page.getByRole('button', { name: 'Team', exact: true }).click()
@@ -40,6 +41,76 @@ test('admin sees team insights, date filtering, and staff controls', async ({ pa
   await page.getByRole('button', { name: 'Save staff account' }).click()
   await expect(page.getByText('Staff account updated.')).toBeVisible()
   expect(backend.staff).toMatchObject({ full_name: 'Staff One Updated', active: false })
+})
+
+test('daily CSV includes sessions beyond the history page and exposes recorded breaks', async ({ page }) => {
+  const backend = await mockSupabase(page, { seed: true })
+  const template = backend.sessions[0]
+  template.break_ms = 5000
+  template.breaks = [{ id: 'break-one', reason: 'Meeting', note: 'Planning', started_at: template.started_at, ended_at: template.ended_at, duration_ms: 5000 }]
+  for (let index = 0; index < 30; index++) backend.sessions.push({ ...template, id: `session-${index}` })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'My insights', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^View session/ })).toHaveCount(25)
+  await expect(page.locator('.insight-stats > div').filter({ hasText: 'Matching sessions' }).locator('strong')).toHaveText('31')
+  await page.getByRole('button', { name: 'Last 7 days', exact: true }).click()
+  await expect(page.locator('.insight-stats > div').filter({ hasText: 'Matching sessions' }).locator('strong')).toHaveText('31')
+  const downloaded = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export daily CSV' }).click()
+  const file = await downloaded
+  expect(file.suggestedFilename()).toMatch(/^FocusWatchAI-.*\.csv$/)
+  const stream = await file.createReadStream()
+  const chunks = []
+  for await (const chunk of stream) chunks.push(chunk)
+  expect(Buffer.concat(chunks).toString('utf8')).toContain('"31","1860","1705","155"')
+  await page.getByRole('button', { name: /^View session/ }).first().click()
+  await expect(page.getByRole('cell', { name: 'Planning', exact: true })).toBeVisible()
+})
+
+test('settings and device preferences survive reload and mobile controls stay accessible', async ({ page }) => {
+  await mockSupabase(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('switch', { name: 'Mirror preview' }).click()
+  await page.getByRole('button', { name: 'Alert settings', exact: true }).click()
+  await page.getByLabel('Eyes closed (seconds)').fill('8')
+  await page.getByRole('button', { name: 'Save alert timings' }).click()
+  await expect(page.getByText('Alert timings saved.', { exact: false })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('switch', { name: 'Mirror preview' })).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByText('Eyes closed: 8s', { exact: true })).toBeVisible()
+  await page.screenshot({ path: 'test-results/workflow-mobile.png', fullPage: true })
+})
+
+test('a local sign-out failure is visible in the workspace and can be retried', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'My insights', exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    const remove = Storage.prototype.removeItem
+    let fail = true
+    Storage.prototype.removeItem = function (key) {
+      if (key === 'focuswatch.auth' && fail) { fail = false; throw new Error('Local sign-out storage unavailable') }
+      return remove.call(this, key)
+    }
+  })
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Could not sign out: Local sign-out storage unavailable')
+  await expect(page.getByRole('button', { name: 'My insights', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Welcome back.' })).toBeVisible()
+})
+
+test('server logout failure still signs out locally and displays the server error', async ({ page }) => {
+  await mockSupabase(page)
+  await page.route('**/auth/v1/logout*', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'Sign-out service unavailable' }) }))
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'My insights', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Welcome back.' })).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('Sign-out service unavailable')
+  expect(await page.evaluate(() => localStorage.getItem('focuswatch.auth'))).toBeNull()
 })
 
 test('unprovisioned accounts see setup instructions instead of the monitoring UI', async ({ page }) => {

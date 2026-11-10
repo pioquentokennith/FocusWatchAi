@@ -14,6 +14,14 @@ function mockCamera(getUserMedia) {
 afterEach(cleanup)
 
 describe('camera lifecycle', () => {
+  it('requests the selected camera exactly and returns its stream only after success', async () => {
+    const { stream } = mockStream()
+    const getUserMedia = vi.fn().mockResolvedValue(stream)
+    mockCamera(getUserMedia)
+    const { result } = renderHook(useCamera)
+    await act(async () => expect(await result.current.start('usb-camera')).toBe(stream))
+    expect(getUserMedia).toHaveBeenCalledWith({ audio: false, video: { width: { ideal: 640 }, height: { ideal: 480 }, deviceId: { exact: 'usb-camera' } } })
+  })
   it('requests video only and releases the track on Stop', async () => {
     const { stream, track } = mockStream()
     const getUserMedia = vi.fn().mockResolvedValue(stream)

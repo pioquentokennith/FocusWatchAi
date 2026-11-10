@@ -13,6 +13,7 @@ async function syntheticCamera(page, portrait = false) {
   await page.addInitScript(({ portrait }) => {
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
       configurable: true,
+      writable: true,
       value: async () => {
         const canvas = document.createElement('canvas')
         canvas.width = 640
@@ -71,6 +72,48 @@ test('loads real model assets, runs inference on a blank feed, and releases the 
   expect(errors).toEqual([])
 })
 
+test('breaks stop the camera and alarm, failed resume stays paused, and new sessions use updated timings', async ({ page }) => {
+  await syntheticCamera(page)
+  await start(page)
+  await expect(page.getByRole('button', { name: 'Silence', exact: true })).toBeVisible({ timeout: 45000 })
+  const id = backend.saved[0].id
+  await page.getByRole('combobox', { name: 'Break reason', exact: true }).selectOption('Lunch')
+  await page.getByLabel('Break note (optional)').fill('Lunch with team')
+  await page.getByRole('button', { name: 'Pause session', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Resume session', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Silence', exact: true })).toBeHidden()
+  expect(await page.evaluate(() => window.__testStream.getTracks().every((track) => track.readyState === 'ended'))).toBe(true)
+  await expect.poll(() => backend.saved.some((row) => row.activity === 'paused' && row.id === id)).toBe(true)
+  await page.getByRole('button', { name: 'Alert settings', exact: true }).click()
+  await page.getByLabel('No face detected (seconds)').fill('6')
+  await page.getByRole('button', { name: 'Save alert timings' }).click()
+  await expect(page.getByText('Alert timings saved.', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Return to session' }).click()
+  await page.evaluate(() => {
+    window.__originalCamera = navigator.mediaDevices.getUserMedia
+    navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied', 'NotAllowedError') }
+  })
+  await page.getByRole('button', { name: 'Resume session', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('denied')
+  await expect(page.getByRole('button', { name: 'End session', exact: true })).toBeEnabled()
+  await page.evaluate(() => { navigator.mediaDevices.getUserMedia = window.__originalCamera })
+  await page.getByRole('button', { name: 'Resume session', exact: true }).click()
+  await expect(page.getByText('No face detected. Move into view to begin calibration.')).toBeVisible({ timeout: 45000 })
+  await page.getByRole('button', { name: 'Stop camera', exact: true }).click()
+  await expect.poll(() => backend.saved.some((row) => row.id === id && row.status === 'completed')).toBe(true)
+  const final = backend.saved.findLast((row) => row.id === id && row.status === 'completed')
+  expect(final.thresholds.NO_FACE).toBe(3000)
+  expect(final.breaks).toHaveLength(1)
+  expect(final.breaks[0]).toMatchObject({ reason: 'Lunch', note: 'Lunch with team' })
+  expect(final.break_ms).toBeGreaterThan(0)
+  expect(Object.values(final.totals).reduce((a, b) => a + b, 0) + final.break_ms).toBe(final.duration_ms)
+  await page.getByRole('button', { name: 'Start camera', exact: true }).click()
+  await expect.poll(() => backend.saved.some((row) => row.id !== id && row.thresholds.NO_FACE === 6000)).toBe(true)
+  await page.getByRole('button', { name: 'Pause session', exact: true }).click()
+  await page.getByRole('button', { name: 'End session', exact: true }).click()
+  await expect.poll(() => backend.saved.some((row) => row.id !== id && row.status === 'completed' && row.breaks[0]?.ended_at)).toBe(true)
+})
+
 test('shows an actionable AI error when model initialization fails', async ({ page }) => {
   await syntheticCamera(page)
   await page.route('**/models/face_landmarker.task', (route) => route.fulfill({ status: 404, body: 'Model not found' }))
@@ -78,6 +121,35 @@ test('shows an actionable AI error when model initialization fails', async ({ pa
   await expect(page.getByRole('heading', { name: 'AI could not continue' })).toBeVisible({ timeout: 45000 })
   await expect(page.getByRole('button', { name: 'Restart AI' })).toBeVisible()
   await page.getByRole('button', { name: 'Stop camera', exact: true }).click()
+})
+
+test('camera disconnection stops an active audio source and finalizes the session', async ({ page }) => {
+  await syntheticCamera(page)
+  await page.addInitScript(() => {
+    const Native = window.AudioContext
+    window.__stoppedSounds = 0
+    window.AudioContext = class extends Native {
+      createBufferSource() {
+        const source = super.createBufferSource()
+        const stop = source.stop.bind(source)
+        source.stop = (...args) => { window.__stoppedSounds++; return stop(...args) }
+        return source
+      }
+    }
+  })
+  await start(page)
+  await expect(page.getByRole('button', { name: 'Silence', exact: true })).toBeVisible({ timeout: 45000 })
+  expect(await page.evaluate(() => window.__stoppedSounds)).toBe(0)
+  await page.evaluate(() => {
+    const track = window.__testStream.getVideoTracks()[0]
+    track.stop()
+    track.dispatchEvent(new Event('ended'))
+  })
+  await expect(page.getByText('Camera off', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Silence', exact: true })).toBeHidden()
+  await expect(page.getByRole('alert')).toContainText('camera disconnected')
+  expect(await page.evaluate(() => window.__stoppedSounds)).toBe(1)
+  await expect.poll(() => backend.saved.some((snapshot) => snapshot.status === 'interrupted' && snapshot.events.some((event) => event.kind === 'NO_FACE' && event.ended_at))).toBe(true)
 })
 
 test('renders the louder alarm waveform, respects volume, and silences on mute', async ({ page }) => {

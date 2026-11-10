@@ -22,7 +22,7 @@ async function launch() {
     env: { ...env, FOCUSWATCH_USER_DATA_DIR: userData },
   })
   const page = await application.firstWindow()
-  await mockSupabase(page)
+  const backend = await mockSupabase(page)
   await page.reload()
   await page.waitForURL('focuswatch://app/')
   await expect(page.getByText('Desktop · Background ready')).toBeVisible()
@@ -50,7 +50,7 @@ async function launch() {
       }
     }
   })
-  return { application, page }
+  return { application, page, backend }
 }
 
 const peak = (page) => page.evaluate(() => {
@@ -68,7 +68,7 @@ const readBackground = (application, expression) => application.evaluate(async (
 }, expression)
 
 test('native camera inference starts an initial no-face alarm while minimized and keeps it repeating', async () => {
-  const { application, page } = await launch()
+  const { application, page, backend } = await launch()
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   try {
@@ -92,9 +92,34 @@ test('native camera inference starts an initial no-face alarm while minimized an
     expect(await readBackground(application, 'window.__audioSources[0].loop')).toBe(true)
     const windowState = await application.evaluate(({ BrowserWindow }) => ({ minimized: BrowserWindow.getAllWindows()[0].isMinimized(), events: globalThis.__windowEvents }))
     expect(windowState.minimized, JSON.stringify(windowState.events)).toBe(true)
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Pause session').click())
+    await expect(page.getByText('On break · Personal', { exact: true })).toBeVisible()
+    await expect.poll(() => peak(page)).toBeLessThan(0.001)
+    await expect.poll(() => backend.saved.some((row) => row.activity === 'paused')).toBe(true)
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore())
+    await page.screenshot({ path: 'test-results/workflow-desktop-break.png', fullPage: true })
+    await page.getByRole('button', { name: 'Resume session', exact: true }).click()
+    await expect(page.getByText('No face detected. Move into view to begin calibration.')).toBeVisible({ timeout: 45000 })
     await page.evaluate(() => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Stop camera').click())
     await expect(page.getByText('Camera released successfully')).toBeVisible()
     await expect.poll(() => peak(page)).toBeLessThan(0.001)
+    await expect.poll(() => backend.saved.some((row) => row.status === 'completed' && row.break_ms > 0 && row.breaks[0]?.ended_at)).toBe(true)
+    await page.getByRole('button', { name: 'My insights', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Export daily CSV' })).toBeEnabled()
+    // Electron downloads use the main-process session event rather than Playwright's browser download event.
+    await application.evaluate(({ app, session }) => {
+      globalThis.__csvDownload = null
+      session.defaultSession.once('will-download', (_event, item) => {
+        const filename = item.getFilename()
+        item.setSavePath(`${app.getPath('userData')}/report.csv`)
+        item.once('done', (_event, state) => { globalThis.__csvDownload = { filename, state, path: item.getSavePath() } })
+      })
+    })
+    await page.getByRole('button', { name: 'Export daily CSV' }).click()
+    await expect.poll(() => application.evaluate(() => globalThis.__csvDownload?.state)).toBe('completed')
+    const download = await application.evaluate(() => globalThis.__csvDownload)
+    expect(download.filename).toMatch(/^FocusWatchAI-.*\.csv$/)
+    expect(await readFile(download.path, 'utf8')).toContain('Entire sessions grouped by start date')
     expect(errors).toEqual([])
   } finally { await application.close() }
 })

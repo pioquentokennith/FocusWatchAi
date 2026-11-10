@@ -10,7 +10,8 @@ test('desktop Google sign-in uses the external browser, loopback code and origin
   await mkdir(tempRoot, { recursive: true })
   const userData = await mkdtemp(path.join(tempRoot, 'focuswatch-google-test-'))
   const { ELECTRON_RUN_AS_NODE, ...env } = process.env
-  const application = await electron.launch({ args: [path.resolve('.')], env: { ...env, FOCUSWATCH_USER_DATA_DIR: userData } })
+  const executablePath = process.env.AI_DESKTOP_EXE
+  const application = await electron.launch({ ...(executablePath ? { executablePath } : {}), args: executablePath ? [] : [path.resolve('.')], env: { ...env, FOCUSWATCH_USER_DATA_DIR: userData } })
   try {
     const page = await application.firstWindow()
     const backend = await mockSupabase(page, { signedIn: false, google: true, provisioned: false })

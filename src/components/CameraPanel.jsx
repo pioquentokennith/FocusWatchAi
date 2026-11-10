@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Camera, CameraOff, Expand, LoaderCircle, Maximize, ScanFace, ShieldCheck } from 'lucide-react'
 import { STATE_LABELS } from '../lib/attentionEngine.js'
 
-export default function CameraPanel({ camera, mirrored, videoRef, canvasRef, detection }) {
+export default function CameraPanel({ camera, mirrored, videoRef, canvasRef, detection, paused = false }) {
   const panelRef = useRef(null)
   const [previewError, setPreviewError] = useState('')
   const [fullscreenError, setFullscreenError] = useState('')
@@ -59,12 +59,12 @@ export default function CameraPanel({ camera, mirrored, videoRef, canvasRef, det
         {!live && (
           <div className="camera-placeholder">
             <div className="scan-illustration"><span className="corner tl" /><span className="corner tr" /><ScanFace size={54} strokeWidth={1} /><span className="corner bl" /><span className="corner br" /></div>
-            <h3>{requesting ? 'Waiting for camera access' : camera.status === 'stopped' ? 'Session complete. Take a breather.' : camera.status === 'error' ? 'Let’s reconnect your camera' : 'Your perspective, visualized.'}</h3>
-            <p>{requesting ? 'Allow access in your browser’s permission prompt.' : camera.status === 'stopped' ? 'Your camera is off. Start again whenever you’re ready.' : camera.status === 'error' ? 'Check the message below to get your preview running.' : 'Enable your camera to bring the workspace to life.'}</p>
+            <h3>{requesting ? 'Waiting for camera access' : paused ? 'Enjoy your break.' : camera.status === 'stopped' ? 'Session complete. Take a breather.' : camera.status === 'error' ? 'Let’s reconnect your camera' : 'Ready for your next session.'}</h3>
+            <p>{requesting ? 'Allow access in your browser’s permission prompt.' : paused ? 'Your camera is off. Resume to continue this session with fresh calibration.' : camera.status === 'stopped' ? 'Your camera is off. Start again whenever you’re ready.' : camera.status === 'error' ? 'Check the message below to get your preview running.' : 'Follow the setup guide, then start your camera.'}</p>
             <span className="placeholder-note">{requesting ? <LoaderCircle size={14} className="spin" /> : <CameraOff size={14} />}{requesting ? 'You can cancel at any time' : 'No camera active'}</span>
           </div>
         )}
-        {live && <div className={`preview-caption ${detection.warning ? 'caption-warning' : ''}`}><ScanFace size={14} />{detection.phase === 'monitoring' ? `AI active · ${STATE_LABELS[detection.state]}` : detection.phase === 'calibrating' ? `AI active · Calibrating ${detection.progress}%` : detection.phase === 'loading' ? 'Loading on-device AI model…' : detection.phase === 'error' ? 'AI unavailable · See message below' : detection.phase === 'suspended' ? 'AI suspended · Return to this tab' : detection.phase === 'calibration_failed' ? 'Calibration needs a retry' : 'AI waiting for fresh camera frames'}</div>}
+        {live && <div className={`preview-caption ${detection.warning ? 'caption-warning' : ''}`}><ScanFace size={14} />{detection.phase === 'monitoring' ? `AI active · ${STATE_LABELS[detection.state]}` : detection.phase === 'calibrating' ? `AI active · Calibrating ${detection.progress}%` : detection.phase === 'loading' ? 'Loading on-device AI model…' : detection.phase === 'error' ? 'AI unavailable · See message below' : detection.phase === 'calibration_failed' ? 'Calibration needs a retry' : 'AI waiting for fresh camera frames'}</div>}
         <div className="stage-bottom"><span className="frame-mark"><Maximize size={15} /> {mirrored ? 'MIRRORED VIEW' : 'NATURAL VIEW'}</span><button className="icon-button" onClick={fullscreen} aria-label="Toggle preview fullscreen" title="Toggle fullscreen"><Expand size={17} /></button></div>
       </div>
       {(previewError || fullscreenError) && <div className="preview-message" role="status">{previewError || fullscreenError}{previewError && <button className="text-button" onClick={playPreview}>Play preview</button>}</div>}

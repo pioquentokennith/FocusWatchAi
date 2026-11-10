@@ -16,20 +16,20 @@ function createPattern(context) {
   return buffer
 }
 
-export function useAlarm() {
+export function useAlarm({ initialVolume = 90, initialMuted = false } = {}) {
   const audio = useRef(null)
   const pattern = useRef(null)
   const active = useRef(null)
-  const enabled = useRef(true)
+  const enabled = useRef(!initialMuted)
   const wanted = useRef(false)
   const dismissed = useRef(false)
   const pending = useRef(false)
-  const level = useRef(90)
+  const level = useRef(initialVolume)
   const generation = useRef(0)
   const mounted = useRef(true)
   const restart = useRef(null)
-  const [muted, setMuted] = useState(false)
-  const [volume, setVolumeState] = useState(90)
+  const [muted, setMuted] = useState(initialMuted)
+  const [volume, setVolumeState] = useState(initialVolume)
   const [audioMessage, setAudioMessage] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
 

@@ -12,6 +12,20 @@ once. It creates the tables, access policies, validated sync functions, and team
 
 The app cannot install this schema using its publishable key.
 
+### Update existing databases
+
+After migrations 001 and 002, run
+`supabase/migrations/003_session_integrity_and_staff_updates.sql` once in SQL Editor.
+New installations also need this migration before using the current app. It repairs
+final sessions missing an end time using their last confirmed device timestamp,
+enforces final end times, and adds conflict-checked staff updates. Older clients'
+three-argument staff-update RPC remains available during the rollout.
+
+Then run `supabase/migrations/004_daily_workflow.sql` once. It creates staff-owned
+alert settings, break records, fixed session threshold snapshots, and the RLS-protected
+`session_report` aggregation. Existing sessions and older clients retain three-second
+threshold defaults and zero break time. Apply the entire file as one transaction.
+
 ## 2. Create assigned accounts
 
 For manual accounts only, keep Email/password enabled and disable **Allow new users
@@ -73,15 +87,23 @@ desktop custom origin without OAuth redirects.
 ## Recording and sync semantics
 
 - Sessions start when camera access actually succeeds, not when permission is requested.
-- Every three-second qualifying condition is counted once per alarm episode and type.
+- Every condition sustained for its session-configured threshold is counted once per alarm episode and type.
   Repeating sound pulses and short uncertain gaps do not create extra events.
 - Event timelines show the episode window and the **observed condition duration**
   within it. Unknown time is not attributed to eye closure or looking away.
 - Coverage totals include brief observations below the alert threshold. They are
   separate from sustained-event counts. Long inference gaps are marked uncertain.
+- Pause records a reason/note and switches off camera and alarm. Resume runs fresh
+  calibration within the same session. Coverage plus break time equals session duration.
+- Staff save their own timings through `update_my_alert_settings`; only their next
+  new session uses changes. The current session retains its thresholds across breaks.
 - The app checkpoints to a per-user local outbox every five seconds and syncs roughly
   every fifteen seconds, plus start/stop and reconnection. No webcam images, video,
   or landmark coordinates are sent to Supabase.
+- Invalid snapshots rejected by the database stay in the local queue with an error
+  message while other valid sessions continue syncing. **Sync now** retries these
+  records after their underlying issue has been resolved. Connection and access
+  failures continue retrying automatically; local records are not discarded.
 - On browsers with Web Locks (including Chromium/Electron), only one window per
   account can own the local recording queue. Close the other window if monitoring
   is waiting for local storage access.
@@ -89,10 +111,13 @@ desktop custom origin without OAuth redirects.
   stay on that device and retry when the same staff member next signs in. Do not clear
   site/app data before they sync. A hard crash may lose up to the latest checkpoint.
 - Closing the app saves an interrupted session locally. If a device crashes or never
-  reconnects, the dashboard labels its last active session **Connection lost** after
+   reconnects, the dashboard labels its last active session **Connection unknown** after
   60 seconds; it does not invent an end time or count offline time as monitoring.
 - Session history is paginated, filtered by local dates, and refreshed every 30 seconds.
   No Realtime publication is required. This keeps the initial free-tier setup simple.
+- Team overview refreshes every 15 seconds. Reports and CSV aggregate all matching
+  sessions, independent of pagination, by local session-start date. Overnight sessions
+  belong entirely to their starting date. Staff RLS applies to reports and break details.
 - These are client-reported camera estimates, not tamper-proof attendance or proof
   of productivity. There is no automatic productivity score.
 

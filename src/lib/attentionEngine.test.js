@@ -5,8 +5,8 @@ const open = { kind: 'FACE', leftEye: 0.3, rightEye: 0.3, blink: 0, yaw: 0, pitc
 const closed = { ...open, leftEye: 0.06, rightEye: 0.06, blink: 1 }
 const away = { ...open, yaw: 35 }
 
-function simulator() {
-  const engine = createAttentionEngine()
+function simulator(thresholds) {
+  const engine = createAttentionEngine(thresholds)
   let time = 0
   let view
   const alerts = []
@@ -47,9 +47,36 @@ describe('calibration', () => {
     engine.resetContinuity()
     expect(feed(open, 2500).phase).toBe('calibrating')
   })
+
+  it('requires fresh calibration after a sustained eye closure', () => {
+    const { feed } = simulator()
+    expect(feed(open, 4000).progress).toBeGreaterThan(80)
+    expect(feed({ ...closed, gazeValid: false }, 15000).progress).toBe(0)
+    expect(feed(open, 500).phase).toBe('calibrating')
+    expect(feed(open, 4500).phase).toBe('monitoring')
+  })
+
+  it('tolerates a brief blink but never completes calibration during it', () => {
+    const { feed } = simulator()
+    feed(open, 4500)
+    expect(feed(closed, 300).phase).toBe('calibrating')
+    expect(feed(open, 100).phase).toBe('monitoring')
+  })
 })
 
 describe('continuous event timing', () => {
+  it.each([
+    ['NO_FACE', { kind: 'NO_FACE' }, 1000],
+    ['EYES_CLOSED', closed, 5000],
+    ['LOOKING_AWAY', away, 6000],
+  ])('uses the personal %s threshold independently', (kind, metrics, ms) => {
+    const settings = { EYES_CLOSED: 5000, LOOKING_AWAY: 6000, NO_FACE: 1000 }
+    const { feed } = simulator(settings)
+    settings[kind] = 60000 // The engine owns its immutable session snapshot.
+    feed(open, 5000)
+    expect(feed(metrics, ms - 100).counts[kind]).toBe(0)
+    expect(feed(metrics, 800).counts[kind]).toBe(1)
+  })
   it('does not alert for 20 natural short blinks', () => {
     const { feed, alerts } = simulator()
     feed(open, 5000)
